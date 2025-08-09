@@ -94,7 +94,7 @@
                 stopBtn.disabled = false;
 
                 try {
-                    stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
+                    stream = await navigator.mediaDevices.getUserMedia({ video: {  facingMode: "environment", width: 640, height: 480 }, audio: false });
                     video.srcObject = stream;
                     await video.play();
                 } catch (err) {
