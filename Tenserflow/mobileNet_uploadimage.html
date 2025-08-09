@@ -1,0 +1,63 @@
+<!-- Pretrained Model : mobilenet@2.1.0 -->
+<html>
+<head>
+  <title>MobileNet Image Classification</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.20.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0"></script>
+  <style>
+    body { font-family: Arial, sans-serif; text-align: center; }
+    img { max-width: 300px; margin-top: 10px; }
+    #predictions { margin-top: 15px; font-size: 18px; }
+  </style>
+</head>
+<body>
+  <h2>MobileNet Image Classifier</h2>
+  <input type="file" id="imageUpload" accept="image/*">
+  <br>
+  <img id="uploadedImage" />
+  <div id="status">Loading model...</div>
+  <div id="predictions"></div>
+
+  <script>
+    let net;
+
+    // Load MobileNet model
+    async function loadModel() {
+      document.getElementById('status').innerText = 'Loading model...';
+      net = await mobilenet.load();
+      document.getElementById('status').innerText = 'Model loaded. Choose an image!';
+    }
+
+    // Classify uploaded image
+    async function classifyImage() {
+      if (!net) {
+        alert("Model not loaded yet!");
+        return;
+      }
+      const img = document.getElementById('uploadedImage');
+      const result = await net.classify(img);
+      let predictionsHTML = "<b>Predictions:</b><br>";
+      result.forEach(pred => {
+        predictionsHTML += `${pred.className} - ${(pred.probability * 100).toFixed(2)}%<br>`;
+      });
+      document.getElementById('predictions').innerHTML = predictionsHTML;
+    }
+
+    // Handle file upload
+    document.getElementById('imageUpload').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = function(event) {
+          const imgElement = document.getElementById('uploadedImage');
+          imgElement.src = event.target.result;
+          imgElement.onload = classifyImage;
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+
+    loadModel();
+  </script>
+</body>
+</html>

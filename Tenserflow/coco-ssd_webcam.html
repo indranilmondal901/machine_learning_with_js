@@ -1,0 +1,228 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <title>Webcam Object Detection — Highlight Cup</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.20.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            padding: 20px;
+        }
+
+        #container {
+            position: relative;
+            width: 640px;
+            max-width: 95%;
+        }
+
+        video,
+        canvas {
+            width: 100%;
+            height: auto;
+            display: block;
+            border-radius: 8px;
+        }
+
+        canvas {
+            position: absolute;
+            left: 0;
+            top: 0;
+            pointer-events: none;
+        }
+
+        #status {
+            margin-top: 6px;
+        }
+
+        button {
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid #ccc;
+            background: #f6f6f6;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>Webcam Object Detection — Highlight & Label "cup"</h2>
+    <div id="container">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+    </div>
+
+    <div>
+        <button id="startBtn">Start Webcam & Model</button>
+        <button id="stopBtn" disabled>Stop</button>
+    </div>
+    <div id="status">Model not loaded</div>
+
+    <script>
+        (async () => {
+            const startBtn = document.getElementById('startBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            const statusEl = document.getElementById('status');
+            const video = document.getElementById('video');
+            const overlay = document.getElementById('overlay');
+            const ctx = overlay.getContext('2d');
+
+            let model = null;
+            let stream = null;
+            let running = false;
+            let detectInterval = 150; // ms between detections
+
+            // Preload model but don't start webcam yet
+            statusEl.innerText = 'Loading COCO-SSD model...';
+            try {
+                model = await cocoSsd.load();
+                statusEl.innerText = 'Model loaded. Click "Start Webcam & Model".';
+            } catch (err) {
+                console.error(err);
+                statusEl.innerText = 'Model load failed: ' + err.message;
+            }
+            //Start Webcam
+            async function start() {
+                if (!model) { alert('Model not loaded'); return; }
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
+                    video.srcObject = stream;
+                    await video.play();
+                } catch (err) {
+                    alert('Could not start webcam: ' + err.message);
+                    startBtn.disabled = false;
+                    stopBtn.disabled = true;
+                    return;
+                }
+
+                // size overlay canvas to match video display size
+                const resizeOverlay = () => {
+                    overlay.width = video.videoWidth;
+                    overlay.height = video.videoHeight;
+                    // scale CSS size to container width (maintains aspect ratio)
+                    overlay.style.width = video.clientWidth + 'px';
+                };
+                video.addEventListener('loadeddata', resizeOverlay);
+                resizeOverlay();
+
+                running = true;
+                statusEl.innerText = 'Detecting...';
+                runDetectionLoop();
+            }
+
+            function stop() {
+                running = false;
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                statusEl.innerText = 'Stopped';
+                // stop webcam tracks
+                if (stream) {
+                    stream.getTracks().forEach(t => t.stop());
+                    stream = null;
+                }
+                // clear overlay
+                ctx.clearRect(0, 0, overlay.width, overlay.height);
+            }
+
+            async function runDetectionLoop() {
+                while (running) {
+                    try {
+                        // run detection on current video frame
+                        const predictions = await model.detect(video);
+                        drawDetections(predictions);
+                    } catch (err) {
+                        console.error('Detection error', err);
+                    }
+                    await new Promise(res => setTimeout(res, detectInterval));
+                }
+            }
+
+            // Draw boxes with "focus" spotlight on the highest-confidence 'cup' (if present).
+            function drawDetections(predictions) {
+                console.log(predictions);
+                // clear
+                ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+                // scale factor (video might be CSS scaled)
+                const scaleX = overlay.width / video.clientWidth;
+                const scaleY = overlay.height / video.clientHeight;
+
+                // find best 'cup' detection
+                const cups = predictions.filter(p => p.class.toLowerCase() === 'cup' || p.class.toLowerCase() === 'mug');
+                // if model uses 'cup' vs 'mug' — accept both
+                let bestCup = null;
+                if (cups.length) {
+                    bestCup = cups.reduce((a, b) => (a.score > b.score ? a : b));
+                }
+
+                if (bestCup) {
+                    const [x, y, w, h] = bestCup.bbox; // bbox in pixels relative to video size
+                    // Draw dimmed overlay but clear the bounding box area for a focus effect
+                    ctx.save();
+                    // dim whole frame
+                    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+                    ctx.fillRect(0, 0, overlay.width, overlay.height);
+                    // clear the region around the cup (slightly larger than bbox)
+                    const pad = Math.max(10, Math.min(40, Math.round(Math.min(w, h) * 0.12)));
+                    const cx = x - pad, cy = y - pad, cw = w + pad * 2, ch = h + pad * 2;
+                    ctx.clearRect(cx, cy, cw, ch);
+
+                    // draw bright rectangle border
+                    ctx.lineWidth = 4;
+                    ctx.strokeStyle = '#00FFAA';
+                    ctx.strokeRect(x, y, w, h);
+
+                    // label background
+                    const label = `${bestCup.class} — ${(bestCup.score * 100).toFixed(1)}%`;
+                    ctx.font = '18px Arial';
+                    const textWidth = ctx.measureText(label).width;
+                    const labelX = x;
+                    const labelY = y > 24 ? y - 8 : y + h + 22;
+                    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+                    ctx.fillRect(labelX - 4, labelY - 18, textWidth + 8, 22);
+                    ctx.fillStyle = 'white';
+                    ctx.fillText(label, labelX, labelY);
+
+                    ctx.restore();
+                }
+
+                // Optionally draw other detections (small boxes + labels)
+                predictions.forEach(p => {
+                    // don't re-draw bestCup box
+                    if (bestCup && p === bestCup) return;
+                    // draw smaller translucent box
+                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = 'rgba(255,165,0,0.9)';
+                    ctx.strokeRect(p.bbox[0], p.bbox[1], p.bbox[2], p.bbox[3]);
+                    const label = `${p.class} ${(p.score * 100).toFixed(1)}%`;
+                    ctx.font = '14px Arial';
+                    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+                    ctx.fillRect(p.bbox[0] - 2, p.bbox[1] - 18, ctx.measureText(label).width + 8, 20);
+                    ctx.fillStyle = 'white';
+                    ctx.fillText(label, p.bbox[0], p.bbox[1] - 4);
+                });
+
+                // update status
+                statusEl.innerText = bestCup ? `Detected: ${bestCup.class} ${(bestCup.score * 100).toFixed(1)}%` : 'No cup detected';
+            }
+
+            // UI bindings
+            startBtn.addEventListener('click', start);
+            stopBtn.addEventListener('click', stop);
+
+            // clean up when tab closed / refreshed
+            window.addEventListener('beforeunload', stop);
+        })();
+    </script>
+</body>
+
+</html>
