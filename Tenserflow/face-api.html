@@ -160,6 +160,7 @@
     switchCamBtn.addEventListener('click', async () => {
       currentDeviceIndex = (currentDeviceIndex + 1) % videoDevices.length;
       await startCamera(videoDevices[currentDeviceIndex]?.deviceId);
+      runRecognitionLoop();
     });
 
     start();
